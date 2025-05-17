@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - Real Estate Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>{{ title }}</h1>
+    </header>
+
+    <div class="container">
+        <aside id="controls-panel">
+            <h2>Controls</h2>
+            <div id="search-control">
+                <h3>Search Property</h3>
+                <label for="pin-search-input">Search by PIN:</label>
+                <input type="text" id="pin-search-input" placeholder="Enter 10-digit PIN">
+                <button id="pin-search-button" type="button">Search</button> <div id="search-result">Enter a PIN to search.</div>
+            </div>
+
+            </aside>
+
+        <main id="map-container">
+            <div id="map"></div>
+        </main>
+    </div>
+
+    <footer>
+        <p>&copy; 2025 Real Estate Dashboard Project</p>
+    </footer>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        // --- Map Setup ---
+        const mapCenterLat = {{ map_center_lat }};
+        const mapCenterLon = {{ map_center_lon }};
+        const initialZoom = {{ map_zoom }};
+        var map = L.map('map').setView([mapCenterLat, mapCenterLon], initialZoom);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+        console.log("Map initialized.");
+
+        // --- Variables ---
+        let parcelsLayer = null;
+        let searchMarker = null;
+
+        // --- Parcel Data Layer Logic ---
+        const parcelsGeoJsonString = '{{ parcels_geojson_data | safe }}';
+        let parcelsGeoJson = null;
+
+        console.log("DEBUG Frontend: Raw parcelsGeoJsonString length:", parcelsGeoJsonString.length);
+        
+        try {
+            parcelsGeoJson = JSON.parse(parcelsGeoJsonString);
+            console.log("DEBUG Frontend: Parsed parcelsGeoJson successfully.");
+            console.log("DEBUG Frontend: Number of features in parsed GeoJSON:", parcelsGeoJson && parcelsGeoJson.features ? parcelsGeoJson.features.length : 'N/A or undefined features');
+            
+            if (!parcelsGeoJson || !parcelsGeoJson.features || parcelsGeoJson.features.length === 0) {
+                console.warn("GeoJSON data is empty or invalid. No parcels will be displayed on map.");
+                const searchResultDiv = document.getElementById('search-result'); // Use existing div for messages
+                if(searchResultDiv) searchResultDiv.innerHTML = '<span style="color:orange;">No parcels to display for the current view.</span>';
+            }
+        } catch (e) {
+            console.error("Error parsing GeoJSON data in frontend:", e);
+            const searchResultDiv = document.getElementById('search-result');
+            if(searchResultDiv) searchResultDiv.innerHTML = '<span style="color:red;">Error loading parcel layer data.</span>';
+        }
+
+        // --- Styling and Popup Functions ---
+        function parcelStyle(feature) {
+            // More standard, less aggressive styling
+            return {
+                color: "#3388ff",       // Leaflet default blue
+                weight: 2,              // Slightly thicker than default
+                opacity: 0.8,
+                fillColor: "#3388ff",
+                fillOpacity: 0.2
+            };
+        }
+        function highlightFeature(e) {
+            var layer = e.target;
+            layer.setStyle({
+                weight: 4,
+                color: '#2c3e50', // Darker blue/grey for highlight
+                dashArray: '',
+                fillOpacity: 0.4
+            });
+            if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) { layer.bringToFront(); }
+        }
+        function resetHighlight(e) {
+            if (parcelsLayer) { parcelsLayer.resetStyle(e.target); }
+        }
+        
+        function displayPropertyInfo(pin, latlng) {
+            const popup = L.popup({minWidth: 250}); // Give popup a min width
+            popup.setLatLng(latlng).setContent(`<i>Loading details for PIN: ${pin}...</i>`).openOn(map);
+            fetch(`/api/property_info/${pin}`)
+                .then(response => {
+                    if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error! Status: ${response.status}`); }); }
+                    return response.json();
+                })
+                .then(data => {
+                    let content = '';
+                    if (data.error) { 
+                        content = `<b>Error:</b> ${data.error}`;
+                    } else {
+                        content = `
+                            <b>PIN:</b> ${data.PIN || 'N/A'}<br>
+                            <b>Address:</b> ${data.ADDRESS || 'N/A'}<br>
+                            <hr>
+                            <b>Assessed Value:</b> ${data.AssessedValueFormatted || data.ASSESSED_VALUE || 'N/A'}<br>
+                            <b>Building Value:</b> ${data.BUILDING_VALUE || 'N/A'}<br>
+                            <b>Acreage:</b> ${data.ACREAGE || 'N/A'}<br>
+                            <b>Use Code:</b> ${data.USE_CODE || 'N/A'}<br>
+                            <b>Park Distance:</b> ${data.ParkDistance || 'N/A (Not Calculated)'}
+                        `;
+                        if (data.pca_top_factors && data.pca_top_factors.length > 0 && data.pca_top_factors[0] !== "PCA temporarily disabled") {
+                             content += `<br><hr><b>Key Value Factors (PCA):</b><ul>`;
+                             data.pca_top_factors.forEach(factor => content += `<li>${factor}</li>`);
+                             content += `</ul>`;
+                        } else if (data.pca_top_factors) {
+                            content += `<br><hr><b>Key Value Factors:</b> ${data.pca_top_factors[0]}`;
+                        }
+                    }
+                    popup.setContent(content);
+                })
+                .catch(error => {
+                    console.error('Error fetching property info for popup:', error);
+                    popup.setContent(`<b>Error:</b> Could not load details. ${error.message || ''}`);
+                });
+        }
+
+        // --- Click Handler for Parcels ---
+        function onEachParcelFeature(feature, layer) {
+            layer.on({
+                mouseover: highlightFeature,
+                mouseout: resetHighlight,
+                click: function(e) {
+                    L.DomEvent.stopPropagation(e); // Stop click from propagating to map perhaps
+                    const props = e.target.feature.properties;
+                    const parcelPIN = props.PIN;
+                    if (!parcelPIN || parcelPIN === "N/A") {
+                        console.warn("Clicked feature has no valid PIN:", props);
+                        L.popup().setLatLng(e.latlng).setContent("<b>Info:</b> Parcel ID not available.").openOn(map);
+                        return;
+                    }
+                    if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+                    displayPropertyInfo(parcelPIN, e.latlng);
+                }
+            });
+        }
+
+        // --- Add GeoJSON Layer to Map ---
+        if (parcelsGeoJson && parcelsGeoJson.features && parcelsGeoJson.features.length > 0) {
+            parcelsLayer = L.geoJSON(parcelsGeoJson, {
+                style: parcelStyle,
+                onEachFeature: onEachParcelFeature
+            }).addTo(map);
+            console.log("DEBUG Frontend: Parcel GeoJSON layer successfully added to map.");
+
+            if (parcelsLayer) {
+                console.log("DEBUG Frontend: Scheduling fitBounds call.");
+                setTimeout(function() {
+                    try {
+                        const layerBounds = parcelsLayer.getBounds();
+                        console.log("DEBUG Frontend: Raw layerBounds object (delayed):", layerBounds); 
+                        if (layerBounds && layerBounds.isValid()) {
+                            console.log("DEBUG Frontend: Bounds are VALID (delayed).");
+                            console.log("DEBUG Frontend: Bounds SouthWest (delayed):", layerBounds.getSouthWest());
+                            console.log("DEBUG Frontend: Bounds NorthEast (delayed):", layerBounds.getNorthEast());
+                            map.fitBounds(layerBounds, {padding: [20, 20]}); // Add some padding
+                            console.log("DEBUG Frontend: map.fitBounds() called (delayed).");
+                        } else {
+                            console.warn("DEBUG Frontend: Parcel layer bounds are NOT valid or layer is empty (delayed), cannot fit map.");
+                        }
+                    } catch (e) {
+                        console.error("DEBUG Frontend: Error during delayed fitBounds process:", e);
+                    }
+                    console.log("DEBUG Frontend: Map center AFTER delayed fitBounds attempt:", map.getCenter());
+                    console.log("DEBUG Frontend: Map zoom AFTER delayed fitBounds attempt:", map.getZoom());
+                }, 100); 
+            }
+            
+            if (parcelsGeoJson.features.length > 0) { /* ... (first feature logging can remain for debug) ... */ }
+        } else {
+            console.log("DEBUG Frontend: Skipping adding GeoJSON layer (parcelsGeoJson is null, has no features, or features array is empty).");
+        }
+
+        // --- PIN Search Logic ---
+        const searchInput = document.getElementById('pin-search-input');
+        const searchButton = document.getElementById('pin-search-button');
+        const searchResultDiv = document.getElementById('search-result');
+
+        function handleSearch() {
+            const pin = searchInput.value.trim();
+            if (!pin) {
+                searchResultDiv.textContent = "Please enter a PIN.";
+                return;
+            }
+            searchResultDiv.textContent = `Searching for PIN: ${pin}...`;
+            if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+            
+            map.closePopup(); // Close any open popups
+
+            fetch(`/api/property_info/${pin}`)
+                .then(response => {
+                    if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error! Status: ${response.status}`); }); }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        searchResultDiv.textContent = `Error: ${data.error}`;
+                    } else if (data.latitude && data.longitude) {
+                        const latlng = [data.latitude, data.longitude];
+                        searchResultDiv.textContent = `Found: ${data.ADDRESS || data.PIN}`;
+                        map.flyTo(latlng, 17); // Zoom to searched property
+                        searchMarker = L.marker(latlng).addTo(map);
+                        setTimeout(() => { // Delay popup to allow map to settle
+                            // Re-use displayPropertyInfo for consistent popup content
+                            displayPropertyInfo(data.PIN, latlng);
+                            // Or a simpler popup for search marker:
+                            // searchMarker.bindPopup(`<b>Searched PIN: ${data.PIN}</b><br>${data.ADDRESS || 'N/A'}`).openPopup();
+                        }, 800);
+                    } else {
+                        searchResultDiv.textContent = `Found PIN ${data.PIN}, but coordinates are missing for map navigation. Details available if you can find it on map.`;
+                         // Display details without zooming - maybe in the searchResultDiv itself or a dedicated details panel
+                         let detailsHtml = `<b>PIN:</b> ${data.PIN || 'N/A'}<br>
+                                            <b>Address:</b> ${data.ADDRESS || 'N/A'}<br>
+                                            <b>Assessed Value:</b> ${data.AssessedValueFormatted || data.ASSESSED_VALUE || 'N/A'}`;
+                         searchResultDiv.innerHTML += `<br><hr>Details:<br>${detailsHtml}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error during PIN search fetch:', error);
+                    searchResultDiv.textContent = `Search Error: ${error.message || 'Could not fetch details.'}`;
+                });
+        }
+        searchButton.addEventListener('click', handleSearch);
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSearch();
+            }
+        });
+    </script>
+</body>
+</html>
