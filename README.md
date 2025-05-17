@@ -2,14 +2,14 @@
 
 This project aims to create a dashboard for visualizing local real estate market factors, their impact on home values, and potential future outlooks, initially focusing on King County, WA.
 
-*(Current as of: 2025-05-01)*
+*(Current as of: 2025-05-17)*
 
 ## Project Objectives
 
 * Visualize market factors affecting home values using map overlays and parcel data.
 * Integrate public data sources (King County GIS, Assessment data).
-* Provide tools for basic property lookup and filtering.
-* Lay the groundwork for future analysis (PCA, AI outlooks).
+* Provide tools for basic property lookup and data exploration.
+* Lay the groundwork for future analysis like PCA and AI-driven insights.
 * Target users: Developers, investors, brokers, consumers.
 
 ## Tech Stack
@@ -23,13 +23,19 @@ This project aims to create a dashboard for visualizing local real estate market
 
 ## Current Features
 
-* Displays an interactive Leaflet map centered on a filtered area (currently Bellevue, WA).
-* Loads King County parcel boundaries (from local Shapefile) and assessment data (from local CSV).
-* Overlays parcel boundaries for the filtered area onto the map.
-* Allows users to click on a displayed parcel to view its details (PIN, Address, Assessed Value, Acreage, etc.) in a popup via an API call.
-* Provides a search box to find a property by its 10-digit PIN; zooms/flies the map to the found parcel's location and displays its info in a marker popup.
-* Includes controls to filter displayed parcels based on a minimum and maximum Assessed Value range (reloads the page with filtered data).
-* Basic unit test implemented for the homepage route.
+* **Interactive Map Display:** Shows a Leaflet map centered on a subset of King County (currently Bellevue, WA).
+* **Parcel Data Integration:**
+    * Loads King County parcel boundaries from a local GeoJSON file (`King_County_Parcels___parcel_area.geojson`).
+    * Loads King County assessment data from a local CSV file (`kc_assessment_data.csv`).
+    * Merges these datasets to link parcel geometries with their assessment attributes.
+* **Parcel Visualization:** Overlays parcel boundaries for the filtered area (Bellevue) onto the map.
+* **Click Interaction:** Allows users to click on a displayed parcel to view its details (PIN, Address, Assessed Value, Acreage, etc.) in a popup via an API call.
+* **Search by PIN:** Provides a search box to find a property by its 10-digit PIN; zooms/flies the map to the found parcel's location and displays its info in a marker popup.
+* **Cleaned UI:** Features an improved layout and styling for better user experience.
+* **Unit Testing:** Basic unit test implemented for the homepage route.
+* **(Temporarily Disabled for Performance Tuning):**
+    * Park distance calculation (augmenting parcels with distance to nearest park).
+    * PCA factor display in popups.
 
 ## Setup Instructions
 
@@ -44,8 +50,10 @@ This project aims to create a dashboard for visualizing local real estate market
     python -m venv venv
     # On macOS/Linux:
     source venv/bin/activate
-    # On Windows:
+    # On Windows (Command Prompt):
     # .\venv\Scripts\activate
+    # On Windows (PowerShell):
+    # .\venv\Scripts\Activate.ps1
     ```
 
 3.  **Install dependencies:**
@@ -54,49 +62,39 @@ This project aims to create a dashboard for visualizing local real estate market
     ```
     *(Note: GeoPandas installation can sometimes be complex due to C library dependencies like GEOS, PROJ. Refer to GeoPandas documentation if installation fails.)*
 
-4.  **Obtain Data:**
-    * **Required:** Place the following files **directly inside the `data/` folder** in the project root:
-        * King County Parcel Shapefile set (must include at least `parcel.shp`, `parcel.shx`, `parcel.dbf`, `parcel.prj`). **Ensure the `.shp` file is named `parcel.shp`** or update `PARCEL_SHAPEFILE_PATH` in `app/data_utils.py`. Finding a Shapefile with valid geometry and CRS is crucial.
-        * King County Assessment Data CSV file. **Ensure it is named `kc_assessment_data.csv`** or update `ASSESSMENT_FILE_PATH` in `app/data_utils.py`. Ensure it contains a `PIN` column matching the Shapefile.
-    * *(Data Source Hint: Look for Parcel and Assessor data on King County's GIS open data portals.)*
+4.  **Obtain Data (Crucial - Not included in Git Repository):**
+    * **Required:** Create a `data/` folder in the project root. Place the following files directly inside this `data/` folder:
+        * **King County Parcel GeoJSON file:** This file should contain parcel geometries and at least a `PIN` property.
+            * **Ensure the file is named `King_County_Parcels___parcel_area.geojson`** or update `PARCEL_GEOJSON_PATH` in `app/data_utils.py`.
+            * The data should ideally have its CRS as WGS84 (EPSG:4326), like `urn:ogc:def:crs:OGC:1.3:CRS84`.
+        * **King County Assessment Data CSV file:** This file should contain assessment details like `ADDRESS`, `ASSESSED_VALUE`, etc., and a `PIN` column for merging.
+            * **Ensure it is named `kc_assessment_data.csv`** or update `ASSESSMENT_FILE_PATH` in `app/data_utils.py`.
+    * **(Optional for Park Distance Feature - Currently Disabled):**
+        * King County Parks Shapefile set (e.g., `kc_parks.shp` and its companions `.shx`, `.dbf`, `.prj`). If you enable this feature, update `PARKS_SHAPEFILE_PATH` in `app/data_utils.py` if your filename differs.
+    * *(Data Source Hint: Look for "Parcels" (GeoJSON or Shapefile) and "Assessor" data on King County's GIS open data portals like `https://gis-kingcounty.opendata.arcgis.com/`.)*
 
 5.  **Set up environment variables (Optional but Recommended for Dev):**
     ```bash
     # On macOS/Linux:
     export FLASK_APP=app
     export FLASK_ENV=development
-    # On Windows:
+    # On Windows (Command Prompt):
     # set FLASK_APP=app
     # set FLASK_ENV=development
+    # On Windows (PowerShell):
+    # $env:FLASK_APP = "app"
+    # $env:FLASK_ENV = "development"
     ```
+    *(Note: Setting `FLASK_ENV=development` enables debug mode and auto-reloading.)*
 
 6.  **Run the application:**
     * Make sure you are in the project root directory (`your-project-name/`).
     * Make sure your virtual environment is active.
+    * The first time you run it, data processing might take some time (e.g., 20-60 seconds depending on your machine and the GeoJSON size). Subsequent loads should be faster due to caching in memory.
     ```bash
     flask run
     ```
 
-7.  Open your web browser and navigate to `http://127.0.0.1:5000` (or the address provided).
+7.  Open your web browser and navigate to `http://127.0.0.1:5000` (or the address provided by Flask).
 
-## Testing
-
-This project uses `pytest`.
-
-1.  Ensure you have activated the virtual environment (`source venv/bin/activate`).
-2.  Make sure development dependencies are installed (`pip install -r requirements.txt` - ensure `pytest` is listed).
-3.  From the **project root directory**, run tests using:
-    ```bash
-    python -m pytest tests/
-    ```
-
-## Project Progress & Sprint Status
-
-* **Sprint 1: Map Integration:** Completed. (Basic app structure, Leaflet map displayed).
-* **Sprint 2: King County Integration:** Completed. (Parcel Shapefile loaded & displayed, assessment data loaded & merged, click-to-view info implemented).
-* **Additional Features Implemented:**
-    * Search by PIN with map zoom/highlight.
-    * Filter displayed parcels by Assessed Value range.
-* **Sprint 3: Property Augmentation (PCA Prep):** Starting/Next Steps. Focus will be on integrating additional relevant datasets (e.g., schools, parks) via spatial analysis and preparing data for PCA.
-* **Sprint 4: Research Assistance (AI Outlooks):** Not Started.
-* **Sprint 5: Clean-up:** Not Started.
+## Project Structure
