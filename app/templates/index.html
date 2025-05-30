@@ -13,16 +13,36 @@
     </header>
 
     <div class="container">
-        <aside id="controls-panel">
-            <h2>Controls</h2>
-            <div id="search-control">
-                <h3>Search Property</h3>
+        <aside id="info-and-controls-panel">
+            <section id="search-control" class="control-section">
+                <h2>Search & Select</h2>
                 <label for="pin-search-input">Search by PIN:</label>
                 <input type="text" id="pin-search-input" placeholder="Enter 10-digit PIN">
-                <button id="pin-search-button" type="button">Search</button> <div id="search-result">Enter a PIN to search.</div>
-            </div>
+                <button id="pin-search-button" type="button">Search</button>
+                <div id="search-result">Enter PIN or click a parcel on the map.</div>
+            </section>
 
-            </aside>
+            <section id="property-details-section" class="control-section">
+                <h3>Property Information</h3>
+                <div id="property-details-content">
+                    <p>Select a property to view its details.</p>
+                </div>
+            </section>
+
+            <section id="pca-analysis-section" class="control-section">
+                <h3>Market Factors (PCA)</h3>
+                <div id="pca-analysis-content">
+                    <p>Select a property to view analysis.</p>
+                </div>
+            </section>
+            
+            <section id="outlook-section" class="control-section">
+                <h3>Predictive Hint</h3>
+                <div id="outlook-content">
+                    <p>Select a property to view outlook hint.</p>
+                </div>
+            </section>
+        </aside>
 
         <main id="map-container">
             <div id="map"></div>
@@ -50,92 +70,165 @@
         // --- Variables ---
         let parcelsLayer = null;
         let searchMarker = null;
+        let currentSelectedPin = null;
+        let currentPopup = null;
 
         // --- Parcel Data Layer Logic ---
         const parcelsGeoJsonString = '{{ parcels_geojson_data | safe }}';
         let parcelsGeoJson = null;
-
-        console.log("DEBUG Frontend: Raw parcelsGeoJsonString length:", parcelsGeoJsonString.length);
-        
         try {
             parcelsGeoJson = JSON.parse(parcelsGeoJsonString);
-            console.log("DEBUG Frontend: Parsed parcelsGeoJson successfully.");
-            console.log("DEBUG Frontend: Number of features in parsed GeoJSON:", parcelsGeoJson && parcelsGeoJson.features ? parcelsGeoJson.features.length : 'N/A or undefined features');
-            
+            console.log(`DEBUG Frontend: Parsed GeoJSON. Features: ${parcelsGeoJson?.features?.length || 0}`);
             if (!parcelsGeoJson || !parcelsGeoJson.features || parcelsGeoJson.features.length === 0) {
-                console.warn("GeoJSON data is empty or invalid. No parcels will be displayed on map.");
-                const searchResultDiv = document.getElementById('search-result'); // Use existing div for messages
-                if(searchResultDiv) searchResultDiv.innerHTML = '<span style="color:orange;">No parcels to display for the current view.</span>';
+                document.getElementById('search-result').innerHTML = '<span style="color:orange;">No parcels in current view.</span>';
             }
-        } catch (e) {
-            console.error("Error parsing GeoJSON data in frontend:", e);
-            const searchResultDiv = document.getElementById('search-result');
-            if(searchResultDiv) searchResultDiv.innerHTML = '<span style="color:red;">Error loading parcel layer data.</span>';
-        }
+        } catch (e) { console.error("Error parsing GeoJSON:", e); document.getElementById('search-result').innerHTML = '<span style="color:red;">Error loading parcel data.</span>';}
 
-        // --- Styling and Popup Functions ---
+        // --- Styling ---
         function parcelStyle(feature) {
-            // More standard, less aggressive styling
-            return {
-                color: "#3388ff",       // Leaflet default blue
-                weight: 2,              // Slightly thicker than default
-                opacity: 0.8,
-                fillColor: "#3388ff",
-                fillOpacity: 0.2
-            };
+            return { color: "#3498db", weight: 1.5, opacity: 0.7, fillColor: "#3498db", fillOpacity: 0.15 };
         }
         function highlightFeature(e) {
             var layer = e.target;
-            layer.setStyle({
-                weight: 4,
-                color: '#2c3e50', // Darker blue/grey for highlight
-                dashArray: '',
-                fillOpacity: 0.4
-            });
+            layer.setStyle({ weight: 4, color: '#2c3e50', fillOpacity: 0.3 });
             if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) { layer.bringToFront(); }
         }
         function resetHighlight(e) {
             if (parcelsLayer) { parcelsLayer.resetStyle(e.target); }
         }
         
-        function displayPropertyInfo(pin, latlng) {
-            const popup = L.popup({minWidth: 250}); // Give popup a min width
-            popup.setLatLng(latlng).setContent(`<i>Loading details for PIN: ${pin}...</i>`).openOn(map);
+        // --- Update Info Panel & Popups ---
+        function updateInfoPanelAndPopup(pin, latlng, isSearchResult = false) {
+            if (!pin) {
+                document.getElementById('property-details-content').innerHTML = "<p>Select a property.</p>";
+                document.getElementById('pca-analysis-content').innerHTML = "<p>Select a property.</p>";
+                document.getElementById('outlook-content').innerHTML = "<p>Select a property.</p>";
+                if (currentPopup) map.closePopup(currentPopup);
+                return;
+            }
+            currentSelectedPin = pin;
+            
+            // Initial loading message for panel
+            document.getElementById('property-details-content').innerHTML = `<i>Loading details for PIN: ${pin}...</i>`;
+            document.getElementById('pca-analysis-content').innerHTML = `<i>Loading analysis...</i>`;
+            document.getElementById('outlook-content').innerHTML = `<i>Loading outlook...</i>`;
+
+            // Create and show loading popup on map (if latlng provided)
+            if (latlng) {
+                if (currentPopup) map.closePopup(currentPopup);
+                const popup = L.popup({minWidth: 250, autoClose: false, closeOnClick: true });
+                currentPopup = popup;
+                popup.setLatLng(latlng)
+                     .setContent(`<i>Loading details for PIN: ${pin}...</i>`)
+                     .openOn(map);
+            }
+
+
             fetch(`/api/property_info/${pin}`)
                 .then(response => {
                     if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error! Status: ${response.status}`); }); }
                     return response.json();
                 })
                 .then(data => {
-                    let content = '';
+                    let detailsHtml = '';
+                    let pcaHtml = '';
+                    let outlookHtml = '';
+                    let briefPopupContent = `<b>PIN: ${data.PIN || pin}</b>`; // Default brief content
+
                     if (data.error) { 
-                        content = `<b>Error:</b> ${data.error}`;
+                        detailsHtml = `<p><b>Error:</b> ${data.error}</p>`;
+                        pcaHtml = `<p><b>Error:</b> ${data.error}</p>`;
+                        outlookHtml = `<p><b>Error:</b> ${data.error}</p>`;
+                        briefPopupContent = `<b>Error:</b> ${data.error}`;
                     } else {
-                        content = `
-                            <b>PIN:</b> ${data.PIN || 'N/A'}<br>
-                            <b>Address:</b> ${data.ADDRESS || 'N/A'}<br>
+                        detailsHtml = `
+                            <p><strong>PIN:</strong> ${data.PIN || 'N/A'}</p>
+                            <p><strong>Address:</strong> ${data.ADDRESS || 'N/A'}</p>
                             <hr>
-                            <b>Assessed Value:</b> ${data.AssessedValueFormatted || data.ASSESSED_VALUE || 'N/A'}<br>
-                            <b>Building Value:</b> ${data.BUILDING_VALUE || 'N/A'}<br>
-                            <b>Acreage:</b> ${data.ACREAGE || 'N/A'}<br>
-                            <b>Use Code:</b> ${data.USE_CODE || 'N/A'}<br>
-                            <b>Park Distance:</b> ${data.ParkDistance || 'N/A (Not Calculated)'}
+                            <p><strong>Assessed Value:</strong> ${data.AssessedValueFormatted || 'N/A'}</p>
+                            <p><strong>Building Value:</strong> ${data.BUILDING_VALUE || 'N/A'}</p>
+                            <p><strong>Acreage:</strong> ${data.AcreageFormatted || 'N/A'}</p> 
+                            <p><strong>Use Code:</strong> ${data.USE_CODE || 'N/A'}</p>
+                            <p><strong>City Code:</strong> ${data.CITY_CODE || 'N/A'}</p>
+                            <p><strong>Park Distance:</strong> ${data.ParkDistance || 'N/A (Not active)'}</p>
                         `;
-                        if (data.pca_top_factors && data.pca_top_factors.length > 0 && data.pca_top_factors[0] !== "PCA temporarily disabled") {
-                             content += `<br><hr><b>Key Value Factors (PCA):</b><ul>`;
-                             data.pca_top_factors.forEach(factor => content += `<li>${factor}</li>`);
-                             content += `</ul>`;
-                        } else if (data.pca_top_factors) {
-                            content += `<br><hr><b>Key Value Factors:</b> ${data.pca_top_factors[0]}`;
+                        briefPopupContent = `<b>PIN: ${data.PIN || 'N/A'}</b><br>${data.ADDRESS || 'N/A'}`;
+
+                        if (data.pca_top_factors && data.pca_top_factors[0] && !data.pca_top_factors[0].toLowerCase().includes("not available") && !data.pca_top_factors[0].toLowerCase().includes("disabled")) {
+                             pcaHtml = `<strong>Top Influencing Factors (Local Area):</strong><ul>`;
+                             data.pca_top_factors.forEach(factor => {
+                                 let factor_name_only = factor.split(' (')[0];
+                                 pcaHtml += `<li>${factor} 
+                                     <button class="ai-outlook-btn" data-factor="${factor_name_only}" data-pin="${pin}" style="font-size:0.8em; padding:2px 4px; margin-left:5px;">Get AI Outlook</button>
+                                     </li>`;
+                             });
+                             pcaHtml += `</ul>`;
+                        } else {
+                            pcaHtml = `<p>${data.pca_top_factors ? data.pca_top_factors[0] : 'PCA Data Not Available'}</p>`;
                         }
+                        outlookHtml = `<div id="outlook-text-${pin}">${data.predictive_hint || 'Not available.'}</div>`; // Unique ID for AI response
                     }
-                    popup.setContent(content);
+                    document.getElementById('property-details-content').innerHTML = detailsHtml;
+                    document.getElementById('pca-analysis-content').innerHTML = pcaHtml;
+                    document.getElementById('outlook-content').innerHTML = outlookHtml;
+
+                    // Update existing popup content if it's still open
+                    if (latlng && currentPopup && currentPopup.isOpen()) {
+                         currentPopup.setContent(briefPopupContent);
+                    } else if (isSearchResult && data.latitude && data.longitude) { // If it was a search result and popup wasn't map click
+                        if(searchMarker) searchMarker.setPopupContent(briefPopupContent);
+                    }
+                    
+                    // Add event listeners to newly created AI outlook buttons
+                    document.querySelectorAll('.ai-outlook-btn').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const factor = this.dataset.factor;
+                            const targetPin = this.dataset.pin; // To update specific outlook div
+                            fetchAIApiOutlook(factor, targetPin);
+                        });
+                    });
                 })
                 .catch(error => {
-                    console.error('Error fetching property info for popup:', error);
-                    popup.setContent(`<b>Error:</b> Could not load details. ${error.message || ''}`);
+                    console.error('Error fetching property info for panel:', error);
+                    const errorMsg = `<b>Error:</b> Could not load details. ${error.message || ''}`;
+                    document.getElementById('property-details-content').innerHTML = errorMsg;
+                    document.getElementById('pca-analysis-content').innerHTML = errorMsg;
+                    document.getElementById('outlook-content').innerHTML = errorMsg;
+                    if (latlng && currentPopup && currentPopup.isOpen()) currentPopup.setContent(errorMsg);
                 });
         }
+        
+        // --- Function to Fetch AI Outlook ---
+        function fetchAIApiOutlook(factorName, pin) {
+            const outlookDivId = `outlook-text-${pin}`; // Should match the ID in updateInfoPanel
+            const outlookDisplayElement = document.getElementById(outlookDivId) || document.getElementById('outlook-content'); // Fallback
+            
+            if (outlookDisplayElement) {
+                 outlookDisplayElement.innerHTML = `<i>Fetching AI outlook for ${factorName}...</i>`;
+            } else {
+                console.error("Outlook display element not found for pin", pin, "factor", factorName);
+                // Attempt to update the main outlook div as a fallback
+                document.getElementById('outlook-content').innerHTML = `<i>Fetching AI outlook for ${factorName}...</i>`;
+            }
+
+
+            fetch(`/api/outlook/${encodeURIComponent(factorName)}`)
+                .then(response => response.json())
+                .then(data => {
+                    let targetDiv = document.getElementById(outlookDivId) || document.getElementById('outlook-content');
+                    if (data.error) {
+                        targetDiv.innerHTML = `<p style="color:red;">AI Error: ${data.error}</p>`;
+                    } else {
+                        targetDiv.innerHTML = `<p><strong>Outlook for ${factorName}:</strong> ${data.outlook}</p>`;
+                    }
+                })
+                .catch(error => {
+                    console.error("Error fetching AI outlook:", error);
+                    let targetDiv = document.getElementById(outlookDivId) || document.getElementById('outlook-content');
+                    targetDiv.innerHTML = `<p style="color:red;">Failed to fetch AI outlook.</p>`;
+                });
+        }
+
 
         // --- Click Handler for Parcels ---
         function onEachParcelFeature(feature, layer) {
@@ -143,55 +236,36 @@
                 mouseover: highlightFeature,
                 mouseout: resetHighlight,
                 click: function(e) {
-                    L.DomEvent.stopPropagation(e); // Stop click from propagating to map perhaps
+                    L.DomEvent.stopPropagation(e);
                     const props = e.target.feature.properties;
-                    const parcelPIN = props.PIN;
+                    const parcelPIN = props.PIN; 
                     if (!parcelPIN || parcelPIN === "N/A") {
-                        console.warn("Clicked feature has no valid PIN:", props);
+                        updateInfoPanel(null);
                         L.popup().setLatLng(e.latlng).setContent("<b>Info:</b> Parcel ID not available.").openOn(map);
                         return;
                     }
                     if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
-                    displayPropertyInfo(parcelPIN, e.latlng);
+                    updateInfoPanelAndPopup(parcelPIN, e.latlng);
                 }
             });
         }
 
         // --- Add GeoJSON Layer to Map ---
         if (parcelsGeoJson && parcelsGeoJson.features && parcelsGeoJson.features.length > 0) {
-            parcelsLayer = L.geoJSON(parcelsGeoJson, {
-                style: parcelStyle,
-                onEachFeature: onEachParcelFeature
-            }).addTo(map);
-            console.log("DEBUG Frontend: Parcel GeoJSON layer successfully added to map.");
-
+            parcelsLayer = L.geoJSON(parcelsGeoJson, { style: parcelStyle, onEachFeature: onEachParcelFeature }).addTo(map);
+            console.log("DEBUG Frontend: Parcel GeoJSON layer added to map.");
             if (parcelsLayer) {
-                console.log("DEBUG Frontend: Scheduling fitBounds call.");
                 setTimeout(function() {
                     try {
                         const layerBounds = parcelsLayer.getBounds();
-                        console.log("DEBUG Frontend: Raw layerBounds object (delayed):", layerBounds); 
                         if (layerBounds && layerBounds.isValid()) {
-                            console.log("DEBUG Frontend: Bounds are VALID (delayed).");
-                            console.log("DEBUG Frontend: Bounds SouthWest (delayed):", layerBounds.getSouthWest());
-                            console.log("DEBUG Frontend: Bounds NorthEast (delayed):", layerBounds.getNorthEast());
-                            map.fitBounds(layerBounds, {padding: [20, 20]}); // Add some padding
-                            console.log("DEBUG Frontend: map.fitBounds() called (delayed).");
-                        } else {
-                            console.warn("DEBUG Frontend: Parcel layer bounds are NOT valid or layer is empty (delayed), cannot fit map.");
-                        }
-                    } catch (e) {
-                        console.error("DEBUG Frontend: Error during delayed fitBounds process:", e);
-                    }
-                    console.log("DEBUG Frontend: Map center AFTER delayed fitBounds attempt:", map.getCenter());
-                    console.log("DEBUG Frontend: Map zoom AFTER delayed fitBounds attempt:", map.getZoom());
+                            map.fitBounds(layerBounds, {padding: [30, 30]});
+                            console.log("DEBUG Frontend: map.fitBounds() called. New zoom: " + map.getZoom());
+                        } else { console.warn("DEBUG Frontend: Parcel layer bounds invalid (delayed).");}
+                    } catch (e) { console.error("DEBUG Frontend: Error in delayed fitBounds:", e); }
                 }, 100); 
             }
-            
-            if (parcelsGeoJson.features.length > 0) { /* ... (first feature logging can remain for debug) ... */ }
-        } else {
-            console.log("DEBUG Frontend: Skipping adding GeoJSON layer (parcelsGeoJson is null, has no features, or features array is empty).");
-        }
+        } else { console.log("DEBUG Frontend: Skipping GeoJSON layer (no features)."); }
 
         // --- PIN Search Logic ---
         const searchInput = document.getElementById('pin-search-input');
@@ -200,55 +274,41 @@
 
         function handleSearch() {
             const pin = searchInput.value.trim();
-            if (!pin) {
-                searchResultDiv.textContent = "Please enter a PIN.";
-                return;
-            }
+            if (!pin) { searchResultDiv.textContent = "Please enter a PIN."; return; }
             searchResultDiv.textContent = `Searching for PIN: ${pin}...`;
             if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
-            
-            map.closePopup(); // Close any open popups
+            map.closePopup(); 
+            updateInfoPanelAndPopup(pin, null, true); // Update panel, pass null for latlng initially, true for isSearchResult
 
-            fetch(`/api/property_info/${pin}`)
-                .then(response => {
-                    if (!response.ok) { return response.json().then(errData => { throw new Error(errData.error || `HTTP error! Status: ${response.status}`); }); }
-                    return response.json();
-                })
+            // Fetch mainly for map navigation; panel is updated by updateInfoPanelAndPopup
+             fetch(`/api/property_info/${pin}`)
+                .then(response => response.json()) // Assume response is always JSON, even for errors
                 .then(data => {
-                    if (data.error) {
-                        searchResultDiv.textContent = `Error: ${data.error}`;
-                    } else if (data.latitude && data.longitude) {
-                        const latlng = [data.latitude, data.longitude];
-                        searchResultDiv.textContent = `Found: ${data.ADDRESS || data.PIN}`;
-                        map.flyTo(latlng, 17); // Zoom to searched property
-                        searchMarker = L.marker(latlng).addTo(map);
-                        setTimeout(() => { // Delay popup to allow map to settle
-                            // Re-use displayPropertyInfo for consistent popup content
-                            displayPropertyInfo(data.PIN, latlng);
-                            // Or a simpler popup for search marker:
-                            // searchMarker.bindPopup(`<b>Searched PIN: ${data.PIN}</b><br>${data.ADDRESS || 'N/A'}`).openPopup();
-                        }, 800);
-                    } else {
-                        searchResultDiv.textContent = `Found PIN ${data.PIN}, but coordinates are missing for map navigation. Details available if you can find it on map.`;
-                         // Display details without zooming - maybe in the searchResultDiv itself or a dedicated details panel
-                         let detailsHtml = `<b>PIN:</b> ${data.PIN || 'N/A'}<br>
-                                            <b>Address:</b> ${data.ADDRESS || 'N/A'}<br>
-                                            <b>Assessed Value:</b> ${data.AssessedValueFormatted || data.ASSESSED_VALUE || 'N/A'}`;
-                         searchResultDiv.innerHTML += `<br><hr>Details:<br>${detailsHtml}`;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error during PIN search fetch:', error);
-                    searchResultDiv.textContent = `Search Error: ${error.message || 'Could not fetch details.'}`;
-                });
+                     if (data.error) { 
+                         // searchResultDiv already updated by updateInfoPanelAndPopup if error
+                     } else if (data.latitude && data.longitude) {
+                         const latlng = [data.latitude, data.longitude];
+                         searchResultDiv.textContent = `Displaying details for PIN ${data.PIN}.`; // Panel has full info
+                         map.flyTo(latlng, 17);
+                         searchMarker = L.marker(latlng).addTo(map);
+                         // Update the popup for the search marker after flyTo
+                         setTimeout(() => {
+                            if (searchMarker && searchMarker.getLatLng().equals(L.latLng(latlng))) { // Check if marker is still relevant
+                                let briefPopupContent = `<b>Searched PIN: ${data.PIN}</b><br>${data.ADDRESS || 'N/A'}`;
+                                searchMarker.bindPopup(briefPopupContent).openPopup();
+                                currentPopup = searchMarker.getPopup();
+                            }
+                         }, 800);
+                     } else {
+                         searchResultDiv.textContent = `Found PIN ${data.PIN}, but no map coordinates. Details in panel.`;
+                     }
+                 })
+                 .catch(error => { // Network error or non-JSON response
+                     searchResultDiv.textContent = `Search Error: ${error.message || 'Could not fetch details.'}`;
+                 });
         }
         searchButton.addEventListener('click', handleSearch);
-        searchInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                handleSearch();
-            }
-        });
+        searchInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') { e.preventDefault(); handleSearch(); } });
     </script>
 </body>
 </html>
