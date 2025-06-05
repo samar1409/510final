@@ -10,3 +10,7 @@ data/
 .vscode/
 .idea/
 .DS_Store
+
+# Add to .gitignore
+*.json
+.config/
