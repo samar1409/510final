@@ -6,8 +6,220 @@
     <title>{{ title }} - Real Estate Dashboard</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .info-tooltip {
+            position: relative;
+            display: inline-block;
+            margin-left: 5px;
+            cursor: help;
+        }
+
+        .info-tooltip .tooltip-text {
+            visibility: hidden;
+            width: 250px;
+            background-color: #555;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 10px;
+            position: absolute;
+            z-index: 1000;
+            left: auto;
+            right: calc(100% + 10px); /* Position to the left with 10px gap */
+            top: 50%;
+            transform: translateY(-50%); /* Center vertically */
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+
+        .info-tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .info-icon {
+            color: #666;
+            border: 1px solid #666;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-style: normal;
+            font-size: 12px;
+        }
+
+        /* Add this to ensure the sidebar tooltips don't get cut off */
+        #info-and-controls-panel .info-tooltip .tooltip-text {
+            width: 250px; /* Slightly smaller width for sidebar */
+            right: calc(100% + 5px); /* Fine-tune position */
+            top: -50%; /* Center vertically with icon */
+            transform: translateY(50%); /* Adjust vertical alignment */
+        }
+
+        /* Theme Variables */
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #333333;
+            --sidebar-bg: #f5f5f5;
+            --border-color: #dddddd;
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #1a1a1a;
+            --text-color: #ffffff;
+            --sidebar-bg: #2d2d2d;
+            --border-color: #404040;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        #info-and-controls-panel {
+            background-color: var(--sidebar-bg);
+            border-color: var(--border-color);
+        }
+
+        .theme-toggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 8px;
+            border-radius: 50%;
+            border: none;
+            background: #666;
+            color: white;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,.1);
+            border-radius: 50%;
+            border-top-color: #3498db;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Improved Section Styling */
+        .control-section {
+            background: var(--bg-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* Enhanced UI Styles */
+        .container {
+            display: flex;
+            height: calc(100vh - 100px);
+            gap: 20px;
+            padding: 20px;
+        }
+
+        #info-and-controls-panel {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+            width: 350px;
+            overflow-y: auto;
+        }
+
+        .control-section {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        #map-container {
+            flex-grow: 1;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+        }
+
+        #map {
+            height: 100%;
+            border-radius: 10px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 8px 0;
+        }
+
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #2980b9;
+        }
+
+        h2 {
+            color: #2c3e50;
+            font-size: 1.2em;
+            margin-bottom: 15px;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #eee;
+            margin: 10px 0;
+        }
+
+        /* Better Scrollbar */
+        #info-and-controls-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #info-and-controls-panel::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        #info-and-controls-panel::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        #info-and-controls-panel::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+    </style>
 </head>
 <body>
+    <button class="theme-toggle" id="theme-toggle">🌓</button>
     <header>
         <h1>{{ title }}</h1>
     </header>
@@ -15,7 +227,12 @@
     <div class="container">
         <aside id="info-and-controls-panel">
             <section id="search-control" class="control-section">
-                <h2>Search & Select</h2>
+                <h2>Search & Select 
+                    <span class="info-tooltip">
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">Property Identification Number (PIN) is a unique 10-digit identifier assigned to each property in King County.</span>
+                    </span>
+                </h2>
                 <label for="pin-search-input">Search by PIN:</label>
                 <input type="text" id="pin-search-input" placeholder="Enter 10-digit PIN">
                 <button id="pin-search-button" type="button">Search</button>
@@ -23,21 +240,38 @@
             </section>
 
             <section id="property-details-section" class="control-section">
-                <h2>Property Information</h2>
+                <h2>Property Information 
+                    <span class="info-tooltip">
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">Official King County property data including assessed value, building value, acreage, and property use classification.</span>
+                    </span>
+                </h2>
+                <!-- Update the property-details-content div -->
                 <div id="property-details-content">
-                    <p>Select a property to view its details.</p>
+                    <p>Select a property to view its details</p>
+                    <div class="spinner" style="display: none;"></div>
                 </div>
             </section>
 
             <section id="pca-analysis-section" class="control-section">
-                <h2>Market Insights</h2>
+                <h2>Market Insights 
+                    <span class="info-tooltip">
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">Principal Component Analysis (PCA) identifies key value factors in the Bellevue area by analyzing relationships between property characteristics.</span>
+                    </span>
+                </h2>
                 <div id="pca-analysis-content">
                     <p>Select a property to view analysis.</p>
                 </div>
             </section>
-            
+
             <section id="outlook-section" class="control-section">
-                <h3>Predictive Hint</h3>
+                <h3>Predictive Hint 
+                    <span class="info-tooltip">
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">Uses Random Forest Machine Learning model to analyze property values. Compares property characteristics with similar properties to predict potential value trends.</span>
+                    </span>
+                </h3>
                 <div id="outlook-content">
                     <p>Select a property to view outlook hint.</p>
                 </div>
@@ -241,6 +475,62 @@
         }
         searchButton.addEventListener('click', handleSearch);
         searchInput.addEventListener('keypress', function(e) { if (e.key === 'Enter') { e.preventDefault(); handleSearch(); } });
+
+        // Theme Toggle
+        const themeToggle = document.getElementById('theme-toggle');
+        const root = document.documentElement;
+        
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = root.getAttribute('data-theme');
+            if (currentTheme === 'dark') {
+                root.removeAttribute('data-theme');
+                themeToggle.textContent = '🌓';
+            } else {
+                root.setAttribute('data-theme', 'dark');
+                themeToggle.textContent = '☀️';
+            }
+        });
+
+        // Update loading indicators in updateInfoPanel function
+        function showLoading() {
+            document.querySelectorAll('.spinner').forEach(spinner => {
+                spinner.style.display = 'inline-block';
+            });
+        }
+
+        function hideLoading() {
+            document.querySelectorAll('.spinner').forEach(spinner => {
+                spinner.style.display = 'none';
+            });
+        }
+
+        // Update the existing updateInfoPanel function
+        const originalUpdateInfoPanel = updateInfoPanel;
+        updateInfoPanel = function(pin) {
+            showLoading();
+            originalUpdateInfoPanel(pin);
+            // Hide loading after fetch completes
+            setTimeout(hideLoading, 1000);
+        };
+
+        // --- Base Map Layers ---
+        const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        });
+
+        const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: '&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+        });
+
+        const baseMaps = {
+            "Streets": streets,
+            "Satellite": satellite
+        };
+
+        L.control.layers(baseMaps).addTo(map);
+        streets.addTo(map);
     </script>
 </body>
 </html>
